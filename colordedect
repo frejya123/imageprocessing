@@ -1,0 +1,151 @@
+import cv2
+import numpy as np
+from collections import defaultdict
+import matplotlib.pyplot as plt
+
+# K-Means clustering algorithm
+def zeynepmeans(data, k, max_iters=100, tol=1e-4):
+    # Initialize centroids randomly
+    centroids = data[np.random.choice(data.shape[0], k, replace=False)]
+    converged = False
+    iter_count = 0
+
+    while (not converged) and (iter_count < max_iters):
+        # Calculate distances between pixels and centroids
+        distances = np.sqrt(((data - centroids[:, np.newaxis])**2).sum(axis=2))
+        labels = np.argmin(distances, axis=0)
+
+        old_centroids = centroids.copy()
+
+        for i in range(k):
+            if np.any(labels == i):
+                # Update centroids
+                centroids[i] = np.mean(data[labels == i], axis=0)
+
+        # Check for convergence
+        if np.allclose(centroids, old_centroids, atol=tol):
+            converged = True
+
+        iter_count += 1
+
+    return labels, centroids
+
+# Create mask for specific colors
+def create_color_mask(image, lower_bound, upper_bound):
+    mask = cv2.inRange(image, lower_bound, upper_bound)
+    return mask
+
+# Find major colors and their percentages
+def find_all_major_colors(image_rgb, num_colors):
+    reshaped_image = image_rgb.reshape((-1, 3))
+    labels, centroids = zeynepmeans(reshaped_image.astype(np.float32), num_colors)
+
+    label_counts = defaultdict(int)
+    for label in labels:
+        label_counts[label] += 1
+
+    total_pixels = reshaped_image.shape[0]
+
+    major_colors = []
+    color_percentages = []
+
+    for centroid in centroids:
+        color = centroid.astype(int)
+        major_colors.append(color)
+
+    for idx, count in sorted(label_counts.items(), key=lambda x: x[1], reverse=True):
+        percentage = (count / total_pixels) * 100
+        color_percentages.append(percentage)
+
+    specific_colors = {
+        'red': (np.array([0, 0, 100]), np.array([100, 100, 255])),
+        'white': (np.array([200, 200, 200]), np.array([255, 255, 255])),
+        'dark_gray': (np.array([50, 50, 50]), np.array([100, 100, 100])),
+        'blue': (np.array([100, 0, 0]), np.array([255, 100, 100])),  # Blue range
+    }
+
+    for color_name, (lower, upper) in specific_colors.items():
+        mask = create_color_mask(image_rgb, lower, upper)
+        color_percentage = (np.sum(mask) / 255) / total_pixels * 100
+        if color_percentage > 0:
+            specific_color = (lower + upper) // 2
+            if not any(np.array_equal(specific_color, color) for color in major_colors):
+                major_colors.append(specific_color)
+                color_percentages.append(color_percentage)
+
+    unique_colors = {}
+    for color, percentage in zip(major_colors, color_percentages):
+        unique_colors[tuple(color)] = percentage
+
+    sorted_colors = sorted(unique_colors.items(), key=lambda item: item[1], reverse=True)
+
+    major_colors = [np.array(color) for color, _ in sorted_colors]
+    color_percentages = [percentage for _, percentage in sorted_colors]
+
+    return major_colors, color_percentages, total_pixels
+
+# Convert RGB to Hex
+def rgb_to_hex(color):
+    return '#{:02x}{:02x}{:02x}'.format(int(color[0]), int(color[1]), int(color[2]))
+
+# Plot color distribution
+def plot_color_distribution(major_colors, color_percentages):
+    fig, ax = plt.subplots(figsize=(10, 10))
+
+    hex_colors = [rgb_to_hex(color) for color in major_colors]
+    labels = [f'RGB: {color}' for color in major_colors]
+
+    wedges, texts, autotexts = ax.pie(color_percentages, labels=labels, colors=hex_colors, autopct='%1.1f%%', startangle=140)
+
+    for text in texts:
+        text.set_fontsize(10)
+
+    for autotext in autotexts:
+        autotext.set_fontsize(8)
+        autotext.set_color('white')
+
+    ax.axis('equal')
+    plt.title('Color Distribution')
+    plt.tight_layout()
+    plt.show()
+
+# Read and process the image
+image_path = '/content/img1.jpg'
+image = cv2.imread(image_path)
+
+image = cv2.resize(image, (0, 0), fx=0.5, fy=0.5)
+
+image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+plt.imshow(image_rgb)
+plt.title('Image')
+plt.axis('off')
+plt.show()
+
+# Find major colors
+num_colors = 10
+major_colors, color_percentages, total_pixels = find_all_major_colors(image_rgb, num_colors)
+
+# Detect and calculate the percentage of red color
+red_lower = np.array([0, 0, 100])
+red_upper = np.array([100, 100, 255])
+red_mask = create_color_mask(image_rgb, red_lower, red_upper)
+red_percentage = (np.sum(red_mask) / 255) / total_pixels * 100
+
+print(f"Red Color Percentage: {red_percentage:.2f}%")
+
+if red_percentage > 0:
+    red_color = (red_lower + red_upper) // 2
+    if not any(np.array_equal(red_color, color) for color in major_colors):
+        major_colors.append(red_color)
+        color_percentages.append(red_percentage)
+
+sorted_colors = sorted(zip(color_percentages, major_colors), key=lambda x: x[0], reverse=True)
+color_percentages, major_colors = zip(*sorted_colors)
+
+print("Final Major Colors and Percentages:")
+for color, percentage in zip(major_colors, color_percentages):
+    print(f"Color: RGB {color}, Percentage: {percentage:.2f}%")
+
+# Display updated color distribution graphically
+plot_color_distribution(major_colors, color_percentages)
